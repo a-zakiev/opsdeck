@@ -55,6 +55,7 @@ import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.GltfModel
 import androidx.xr.scenecore.GltfModelEntity
 import androidx.xr.scenecore.MovableComponent
+import androidx.xr.scenecore.scene
 import com.zakiev.spatialdashboard.data.PanelPlacement
 import com.zakiev.spatialdashboard.model.MetricSeries
 import com.zakiev.spatialdashboard.ui.panels.ChartEditorPanel
@@ -173,8 +174,10 @@ private fun Bars3DChart(series: MetricSeries?) {
             val model = GltfModel.create(session, bytes, "bars-${bytes.contentHashCode()}.glb")
             val previous = holder.entity
             // keep the pose the user dragged it to when the data updates
-            val pose = previous?.getPose() ?: Pose(Vector3(-1.1f, 0.05f, -1.35f), Quaternion.Identity)
-            val entity = GltfModelEntity.create(session, model, pose)
+            val pose = previous?.getPose() ?: Pose(Vector3(-0.4f, 0.45f, -1.2f), Quaternion.Identity)
+            // without an explicit parent the entity is not attached to the
+            // scene graph and stays invisible
+            val entity = GltfModelEntity.create(session, model, pose, session.scene.activitySpace)
             entity.addComponent(MovableComponent.createSystemMovable(session))
             previous?.dispose()
             holder.entity = entity

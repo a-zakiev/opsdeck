@@ -32,7 +32,7 @@ object BarsGlb {
         val json = """
             {"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],
             "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2,"material":0}]}],
-            "materials":[{"doubleSided":true,"pbrMetallicRoughness":{"baseColorFactor":[0.37,0.92,0.83,1.0],"metallicFactor":0.0,"roughnessFactor":0.55}}],
+            "materials":[{"doubleSided":true,"emissiveFactor":[0.13,0.42,0.38],"pbrMetallicRoughness":{"baseColorFactor":[0.37,0.92,0.83,1.0],"metallicFactor":0.0,"roughnessFactor":0.55}}],
             "buffers":[{"byteLength":${bin.size}}],
             "bufferViews":[
             {"buffer":0,"byteOffset":0,"byteLength":${posBytes.size},"target":34962},
