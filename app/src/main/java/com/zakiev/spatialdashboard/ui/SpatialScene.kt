@@ -66,6 +66,7 @@ import com.zakiev.spatialdashboard.ui.panels.SettingsPanel
 import com.zakiev.spatialdashboard.ui.panels.StatusPanel
 import com.zakiev.spatialdashboard.util.BarsGlb
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.roundToInt
 
 @Composable
 fun DashboardApp(viewModel: DashboardViewModel = viewModel()) {
@@ -161,10 +162,14 @@ private fun Bars3DChart(series: MetricSeries?) {
     if (series == null || series.points.size < 2) return
     val session = LocalSession.current ?: return
 
+    // quantized to a few height levels so the model is only rebuilt when the
+    // shape visibly changes, not on every noisy refresh
     val buckets = remember(series) {
         val values = series.points.map { it.value }
         val bucketSize = (values.size + BARS_3D - 1) / BARS_3D
-        values.chunked(bucketSize).map { it.average() }
+        val raw = values.chunked(bucketSize).map { it.average() }
+        val max = raw.maxOrNull()?.takeIf { it > 1e-9 } ?: 1.0
+        raw.map { (it / max * HEIGHT_LEVELS).roundToInt().toDouble() / HEIGHT_LEVELS }
     }
     val holder = remember { Bars3DHolder() }
 
@@ -172,15 +177,19 @@ private fun Bars3DChart(series: MetricSeries?) {
         try {
             val bytes = BarsGlb.build(buckets)
             val model = GltfModel.create(session, bytes, "bars-${bytes.contentHashCode()}.glb")
-            val previous = holder.entity
+            val previousEntity = holder.entity
+            val previousModel = holder.model
             // keep the pose the user dragged it to when the data updates
-            val pose = previous?.getPose() ?: Pose(Vector3(-0.4f, 0.45f, -1.2f), Quaternion.Identity)
+            val pose = previousEntity?.getPose() ?: Pose(Vector3(-0.4f, 0.45f, -1.2f), Quaternion.Identity)
             // without an explicit parent the entity is not attached to the
             // scene graph and stays invisible
             val entity = GltfModelEntity.create(session, model, pose, session.scene.activitySpace)
             entity.addComponent(MovableComponent.createSystemMovable(session))
-            previous?.dispose()
             holder.entity = entity
+            holder.model = model
+            // release the previous generation, models leak renderer memory otherwise
+            previousEntity?.dispose()
+            previousModel?.close()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -190,16 +199,20 @@ private fun Bars3DChart(series: MetricSeries?) {
     DisposableEffect(Unit) {
         onDispose {
             holder.entity?.dispose()
+            holder.model?.close()
             holder.entity = null
+            holder.model = null
         }
     }
 }
 
 private class Bars3DHolder {
     var entity: GltfModelEntity? = null
+    var model: GltfModel? = null
 }
 
 private const val BARS_3D = 14
+private const val HEIGHT_LEVELS = 24
 
 // A SpatialPanel that owns its pose and size (custom move/resize policies)
 // and restores them from saved placements between launches
