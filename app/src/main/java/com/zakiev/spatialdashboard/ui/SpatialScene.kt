@@ -12,31 +12,30 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.xr.compose.platform.LocalSession
 import androidx.xr.compose.platform.LocalSpatialCapabilities
 import androidx.xr.compose.spatial.Orbiter
 import androidx.xr.compose.spatial.OrbiterAnchorPoint
 import androidx.xr.compose.spatial.Subspace
-import androidx.xr.compose.subspace.ExperimentalSpatialGltfModelApi
 import androidx.xr.compose.subspace.SpatialColumn
-import androidx.xr.compose.subspace.SpatialGltfModel
-import androidx.xr.compose.subspace.SpatialGltfModelSource
 import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SpatialRow
-import androidx.xr.compose.subspace.rememberSpatialGltfModelState
 import androidx.xr.compose.subspace.layout.MovePolicy
 import androidx.xr.compose.subspace.layout.ResizePolicy
 import androidx.xr.compose.subspace.layout.SpatialMoveEventType
@@ -53,6 +52,9 @@ import androidx.xr.compose.unit.DpVolumeSize
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
+import androidx.xr.scenecore.GltfModel
+import androidx.xr.scenecore.GltfModelEntity
+import androidx.xr.scenecore.MovableComponent
 import com.zakiev.spatialdashboard.data.PanelPlacement
 import com.zakiev.spatialdashboard.model.MetricSeries
 import com.zakiev.spatialdashboard.ui.panels.ChartEditorPanel
@@ -62,7 +64,7 @@ import com.zakiev.spatialdashboard.ui.panels.MetricsPanel
 import com.zakiev.spatialdashboard.ui.panels.SettingsPanel
 import com.zakiev.spatialdashboard.ui.panels.StatusPanel
 import com.zakiev.spatialdashboard.util.BarsGlb
-import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 
 @Composable
 fun DashboardApp(viewModel: DashboardViewModel = viewModel()) {
@@ -150,36 +152,48 @@ private fun SpatialScene(state: DashboardViewModel.UiState, vm: DashboardViewMod
     }
 }
 
-// Real 3D bars: the glTF geometry is generated from the series on the fly
-// and rendered as a volumetric model floating next to the flat panels
-@OptIn(ExperimentalSpatialGltfModelApi::class)
+// Real 3D bars: glTF geometry is generated from the series on the fly and
+// rendered as a SceneCore entity. The compose-level SpatialGltfModel can only
+// load from assets, so the entity is managed by hand here.
 @Composable
 private fun Bars3DChart(series: MetricSeries?) {
     if (series == null || series.points.size < 2) return
-    val context = LocalContext.current
+    val session = LocalSession.current ?: return
 
     val buckets = remember(series) {
         val values = series.points.map { it.value }
         val bucketSize = (values.size + BARS_3D - 1) / BARS_3D
         values.chunked(bucketSize).map { it.average() }
     }
-    val source = remember(buckets) {
-        val bytes = BarsGlb.build(buckets)
-        val file = File(context.cacheDir, "bars-${bytes.contentHashCode()}.glb")
-        if (!file.exists()) file.writeBytes(bytes)
-        context.cacheDir.listFiles()
-            ?.filter { it.name.startsWith("bars-") && it.name != file.name }
-            ?.forEach { it.delete() }
-        SpatialGltfModelSource.fromPath(file.toPath())
-    }
+    val holder = remember { Bars3DHolder() }
 
-    SpatialGltfModel(
-        state = rememberSpatialGltfModelState(source),
-        modifier = SubspaceModifier
-            .width(520.dp)
-            .height(280.dp)
-            .movable(),
-    )
+    LaunchedEffect(buckets) {
+        try {
+            val bytes = BarsGlb.build(buckets)
+            val model = GltfModel.create(session, bytes, "bars-${bytes.contentHashCode()}.glb")
+            val previous = holder.entity
+            // keep the pose the user dragged it to when the data updates
+            val pose = previous?.getPose() ?: Pose(Vector3(-1.1f, 0.05f, -1.35f), Quaternion.Identity)
+            val entity = GltfModelEntity.create(session, model, pose)
+            entity.addComponent(MovableComponent.createSystemMovable(session))
+            previous?.dispose()
+            holder.entity = entity
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d("OpsDeck", "3d bars failed to load", e)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            holder.entity?.dispose()
+            holder.entity = null
+        }
+    }
+}
+
+private class Bars3DHolder {
+    var entity: GltfModelEntity? = null
 }
 
 private const val BARS_3D = 14
