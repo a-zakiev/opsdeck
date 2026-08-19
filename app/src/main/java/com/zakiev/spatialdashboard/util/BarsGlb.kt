@@ -3,43 +3,33 @@ package com.zakiev.spatialdashboard.util
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-// Builds a tiny binary glTF (.glb) with one box per value, so the bar chart
-// is real 3D geometry. Sizes are in meters, bars sit on y = 0.
+// Builds a tiny binary glTF (.glb) with a single unit cube: x and z from
+// -0.5 to 0.5, y from 0 to 1, so a non-uniform entity scale stretches it
+// upwards. One model gets instanced for every bar and the base plate.
 object BarsGlb {
 
-    fun build(values: List<Double>): ByteArray {
-        val n = values.size
-        val maxValue = values.maxOrNull()?.takeIf { it > 1e-9 } ?: 1.0
-
-        val positions = ArrayList<Float>(n * 24 * 3)
-        val normals = ArrayList<Float>(n * 24 * 3)
-        val indices = ArrayList<Int>(n * 36)
-
-        val totalWidth = n * BAR_W + (n - 1) * GAP
-        values.forEachIndexed { i, value ->
-            val h = ((value / maxValue).toFloat().coerceAtLeast(0.06f)) * MAX_H
-            val x0 = -totalWidth / 2 + i * (BAR_W + GAP)
-            addBox(positions, normals, indices, x0, x0 + BAR_W, 0f, h, -DEPTH / 2, DEPTH / 2)
-        }
+    fun unitCube(r: Float, g: Float, b: Float, emissive: Float): ByteArray {
+        val positions = ArrayList<Float>(24 * 3)
+        val normals = ArrayList<Float>(24 * 3)
+        val indices = ArrayList<Int>(36)
+        addBox(positions, normals, indices, -0.5f, 0.5f, 0f, 1f, -0.5f, 0.5f)
 
         val posBytes = floatBytes(positions)
         val normBytes = floatBytes(normals)
         val idxBytes = intBytes(indices)
         val bin = posBytes + normBytes + idxBytes
 
-        val minY = 0f
-        val maxY = MAX_H
         val json = """
             {"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],
             "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2,"material":0}]}],
-            "materials":[{"doubleSided":true,"emissiveFactor":[0.13,0.42,0.38],"pbrMetallicRoughness":{"baseColorFactor":[0.37,0.92,0.83,1.0],"metallicFactor":0.0,"roughnessFactor":0.55}}],
+            "materials":[{"doubleSided":true,"emissiveFactor":[${r * emissive},${g * emissive},${b * emissive}],"pbrMetallicRoughness":{"baseColorFactor":[$r,$g,$b,1.0],"metallicFactor":0.0,"roughnessFactor":0.55}}],
             "buffers":[{"byteLength":${bin.size}}],
             "bufferViews":[
             {"buffer":0,"byteOffset":0,"byteLength":${posBytes.size},"target":34962},
             {"buffer":0,"byteOffset":${posBytes.size},"byteLength":${normBytes.size},"target":34962},
             {"buffer":0,"byteOffset":${posBytes.size + normBytes.size},"byteLength":${idxBytes.size},"target":34963}],
             "accessors":[
-            {"bufferView":0,"componentType":5126,"count":${positions.size / 3},"type":"VEC3","min":[${-totalWidth / 2},$minY,${-DEPTH / 2}],"max":[${totalWidth / 2},$maxY,${DEPTH / 2}]},
+            {"bufferView":0,"componentType":5126,"count":${positions.size / 3},"type":"VEC3","min":[-0.5,0.0,-0.5],"max":[0.5,1.0,0.5]},
             {"bufferView":1,"componentType":5126,"count":${normals.size / 3},"type":"VEC3"},
             {"bufferView":2,"componentType":5125,"count":${indices.size},"type":"SCALAR"}]}
         """.trimIndent().replace("\n", "")
@@ -100,9 +90,4 @@ object BarsGlb {
         buf.put(binPadded)
         return buf.array()
     }
-
-    private const val BAR_W = 0.05f
-    private const val GAP = 0.018f
-    private const val DEPTH = 0.05f
-    private const val MAX_H = 0.32f
 }

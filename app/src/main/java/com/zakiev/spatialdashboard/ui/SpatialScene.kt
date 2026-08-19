@@ -13,6 +13,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import android.util.Log
+import android.view.Gravity
+import android.widget.TextView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -22,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -49,12 +52,14 @@ import androidx.xr.compose.subspace.layout.rotate
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeOffset
 import androidx.xr.compose.unit.DpVolumeSize
+import androidx.xr.runtime.math.FloatSize2d
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.GltfModel
 import androidx.xr.scenecore.GltfModelEntity
 import androidx.xr.scenecore.MovableComponent
+import androidx.xr.scenecore.PanelEntity
 import androidx.xr.scenecore.scene
 import com.zakiev.spatialdashboard.data.PanelPlacement
 import com.zakiev.spatialdashboard.model.MetricSeries
@@ -154,16 +159,17 @@ private fun SpatialScene(state: DashboardViewModel.UiState, vm: DashboardViewMod
     }
 }
 
-// Real 3D bars: glTF geometry is generated from the series on the fly and
-// rendered as a SceneCore entity. The compose-level SpatialGltfModel can only
-// load from assets, so the entity is managed by hand here.
+// Real 3D bars built from SceneCore entities. The scene graph is created once
+// (a caption panel as the movable root, a base plate and one cube entity per
+// bar); data refreshes only adjust entity scales. Entities are never recreated
+// mid-session: disposing one while the user is dragging it crashes the runtime.
 @Composable
 private fun Bars3DChart(series: MetricSeries?) {
     if (series == null || series.points.size < 2) return
     val session = LocalSession.current ?: return
+    val context = LocalContext.current
 
-    // quantized to a few height levels so the model is only rebuilt when the
-    // shape visibly changes, not on every noisy refresh
+    // quantized to a few height levels so scales only change when visible
     val buckets = remember(series) {
         val values = series.points.map { it.value }
         val bucketSize = (values.size + BARS_3D - 1) / BARS_3D
@@ -175,44 +181,74 @@ private fun Bars3DChart(series: MetricSeries?) {
 
     LaunchedEffect(buckets) {
         try {
-            val bytes = BarsGlb.build(buckets)
-            val model = GltfModel.create(session, bytes, "bars-${bytes.contentHashCode()}.glb")
-            val previousEntity = holder.entity
-            val previousModel = holder.model
-            // keep the pose the user dragged it to when the data updates
-            val pose = previousEntity?.getPose() ?: Pose(Vector3(-0.4f, 0.45f, -1.2f), Quaternion.Identity)
-            // without an explicit parent the entity is not attached to the
-            // scene graph and stays invisible
-            val entity = GltfModelEntity.create(session, model, pose, session.scene.activitySpace)
-            entity.addComponent(MovableComponent.createSystemMovable(session))
-            holder.entity = entity
-            holder.model = model
-            // release the previous generation, models leak renderer memory otherwise
-            previousEntity?.dispose()
-            previousModel?.close()
+            if (holder.root == null) {
+                val barModel = GltfModel.create(session, BarsGlb.unitCube(0.37f, 0.92f, 0.83f, 0.45f), "bar-cube.glb")
+                val plateModel = GltfModel.create(session, BarsGlb.unitCube(0.12f, 0.17f, 0.28f, 0.15f), "plate-cube.glb")
+                holder.models = listOf(barModel, plateModel)
+
+                val caption = TextView(context).apply {
+                    text = "network in, last 15m"
+                    setTextColor(0xFFE2E8F0.toInt())
+                    setBackgroundColor(0xE60F172A.toInt())
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                }
+                val root = PanelEntity.create(
+                    session,
+                    caption,
+                    FloatSize2d(0.6f, 0.06f),
+                    "bars3d",
+                    Pose(Vector3(-0.4f, 0.35f, -1.2f), Quaternion.Identity),
+                    session.scene.activitySpace,
+                )
+                holder.root = root
+                root.addComponent(MovableComponent.createSystemMovable(session))
+
+                val plate = GltfModelEntity.create(session, plateModel, Pose(Vector3(0f, 0.05f, 0f)), root)
+                plate.setScale(Vector3(BARS_TOTAL_W + 0.06f, 0.012f, 0.16f))
+                holder.plate = plate
+
+                holder.bars = (0 until BARS_3D).map { i ->
+                    val x = -BARS_TOTAL_W / 2 + BAR_STEP / 2 + i * BAR_STEP
+                    GltfModelEntity.create(session, barModel, Pose(Vector3(x, 0.065f, 0f)), root)
+                }
+            }
+            holder.bars.forEachIndexed { i, bar ->
+                val h = (buckets.getOrNull(i) ?: 0.0).toFloat().coerceAtLeast(0.05f) * BARS_MAX_H
+                bar.setScale(Vector3(BAR_STEP * 0.7f, h, 0.05f))
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.d("OpsDeck", "3d bars failed to load", e)
+            Log.d("OpsDeck", "3d bars failed", e)
         }
     }
     DisposableEffect(Unit) {
         onDispose {
-            holder.entity?.dispose()
-            holder.model?.close()
-            holder.entity = null
-            holder.model = null
+            holder.bars.forEach { it.dispose() }
+            holder.plate?.dispose()
+            holder.root?.dispose()
+            holder.models.forEach { it.close() }
+            holder.bars = emptyList()
+            holder.plate = null
+            holder.root = null
+            holder.models = emptyList()
         }
     }
 }
 
 private class Bars3DHolder {
-    var entity: GltfModelEntity? = null
-    var model: GltfModel? = null
+    var root: PanelEntity? = null
+    var plate: GltfModelEntity? = null
+    var bars: List<GltfModelEntity> = emptyList()
+    var models: List<GltfModel> = emptyList()
 }
 
 private const val BARS_3D = 14
 private const val HEIGHT_LEVELS = 24
+private const val BARS_TOTAL_W = 0.9f
+private const val BAR_STEP = BARS_TOTAL_W / BARS_3D
+private const val BARS_MAX_H = 0.3f
 
 // A SpatialPanel that owns its pose and size (custom move/resize policies)
 // and restores them from saved placements between launches

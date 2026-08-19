@@ -10,7 +10,7 @@ class BarsGlbTest {
 
     @Test
     fun `produces a well formed glb container`() {
-        val bytes = BarsGlb.build(listOf(1.0, 2.0, 3.0, 4.0))
+        val bytes = BarsGlb.unitCube(0.37f, 0.92f, 0.83f, 0.45f)
 
         // magic "glTF", version 2, declared length matches
         assertEquals(0x46546C67, readInt(bytes, 0))
@@ -21,7 +21,7 @@ class BarsGlbTest {
         assertTrue(bytes.size % 4 == 0)
 
         // dump for manual inspection
-        File("build/bars-test.glb").writeBytes(BarsGlb.build(List(14) { (it + 1).toDouble() }))
+        File("build/bars-test.glb").writeBytes(BarsGlb.unitCube(0.37f, 0.92f, 0.83f, 0.45f))
     }
 
     private fun readInt(b: ByteArray, offset: Int): Int =
