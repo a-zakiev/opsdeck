@@ -53,6 +53,7 @@ import androidx.xr.compose.subspace.layout.width
 import androidx.xr.compose.unit.DpVolumeOffset
 import androidx.xr.compose.unit.DpVolumeSize
 import androidx.xr.runtime.math.FloatSize2d
+import androidx.xr.runtime.math.FloatSize3d
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Quaternion
 import androidx.xr.runtime.math.Vector3
@@ -60,6 +61,7 @@ import androidx.xr.scenecore.GltfModel
 import androidx.xr.scenecore.GltfModelEntity
 import androidx.xr.scenecore.MovableComponent
 import androidx.xr.scenecore.PanelEntity
+import androidx.xr.scenecore.ResizableComponent
 import androidx.xr.scenecore.scene
 import com.zakiev.spatialdashboard.data.PanelPlacement
 import com.zakiev.spatialdashboard.model.MetricSeries
@@ -196,13 +198,23 @@ private fun Bars3DChart(series: MetricSeries?) {
                 val root = PanelEntity.create(
                     session,
                     caption,
-                    FloatSize2d(0.6f, 0.06f),
+                    FloatSize2d(BARS_ROOT_W, 0.06f),
                     "bars3d",
                     Pose(Vector3(-0.4f, 0.35f, -1.2f), Quaternion.Identity),
                     session.scene.activitySpace,
                 )
                 holder.root = root
                 root.addComponent(MovableComponent.createSystemMovable(session))
+                // corner handles resize the whole construct: children inherit scale
+                root.addComponent(
+                    ResizableComponent.create(
+                        session = session,
+                        minimumSize = FloatSize3d(0.2f, 0.2f, 0.2f),
+                        maximumSize = FloatSize3d(1.8f, 1.8f, 1.8f),
+                    ) { event ->
+                        holder.root?.setScale(event.newSize.width / BARS_ROOT_W)
+                    },
+                )
 
                 val plate = GltfModelEntity.create(session, plateModel, Pose(Vector3(0f, 0.05f, 0f)), root)
                 plate.setScale(Vector3(BARS_TOTAL_W + 0.06f, 0.012f, 0.16f))
@@ -249,6 +261,7 @@ private const val HEIGHT_LEVELS = 24
 private const val BARS_TOTAL_W = 0.9f
 private const val BAR_STEP = BARS_TOTAL_W / BARS_3D
 private const val BARS_MAX_H = 0.3f
+private const val BARS_ROOT_W = 0.6f
 
 // A SpatialPanel that owns its pose and size (custom move/resize policies)
 // and restores them from saved placements between launches
